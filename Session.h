@@ -33,7 +33,6 @@
 #include "User.h"
 
 
-
 class Task
 {
 private:
@@ -131,6 +130,7 @@ class Verification
 private:
   VerificationEvent event[MAX_VERIFICATIONS];
   bool enabled = true;
+  bool needsSchedule = true;  // indicates that a new set of verification requests have to be scheduled (for the next day)
   bool dayIsCompleted = false;
   int requiredCountPerDay = 0;
   int currentIndex = 0;
@@ -140,6 +140,8 @@ public:
   void Init();
   bool IsEnabled() { return enabled; }
   void SetEnabled(bool e) { enabled = e; }
+  bool NeedsSchedule() { return needsSchedule; }
+  void SetNeedsSchedule(bool n) { needsSchedule = n; }
   void SetVerificationMode(bool onOff, int count=1);
   // only for settings exchange:
   void SetVerificationModeInt(int mode) { enabled = (mode > 0); requiredCountPerDay = mode; }
@@ -148,7 +150,7 @@ public:
   void SetActualToday(int a);
   int GetActualToday();
   bool IsDayCompleted() { return dayIsCompleted; }
-  void SetDayCompleted(bool i) { dayIsCompleted = i; }
+  void SetDayCompleted(bool i) { dayIsCompleted = i; needsSchedule = true; }
   //
   int GetCurrentIndex() { return currentIndex; }
   void SetCurrentIndex(int c) { currentIndex = c; }
@@ -176,18 +178,18 @@ class Session
 private:
   String id;
   String chatId;
-  bool activeChastikeySession = false;
   bool randomShockMode = false;
   bool ramdomShockOffMessage30 = false;
   bool ramdomShockOffMessage10 = false;
   unsigned long randomShocksPerHour = 1;
   bool teasingMode = true;
-  int credits = 0;
-  int unlockVouchers = 0;
-  int creditFractions = 0;
+  unsigned long awayCounter = 0;
+//  int credits = 0;
+//  int unlockVouchers = 0;
+//  int creditFractions = 0;
   int deviations = 0;
   int failures = 0;
-  String chastikeyHolder;
+  unsigned int wearerPresence = 0;
   unsigned long endTime;
   String endTimeStr;
   bool elapsedTimeDisplay;
@@ -203,6 +205,8 @@ private:
   unsigned long timeOfLast5sInterval = 0;
   unsigned long timeOfLast1minInterval = 0;
   unsigned long timeOfLast5minInterval = 0;
+  unsigned long lockTimerEnd = 0;
+  bool lockTimerWasActive = false;
 
 public:
   Session() {}
@@ -220,11 +224,6 @@ public:
 //  User & GetSupervisor() { return supervisor; }
 //  bool HasSupervisor() { return (supervisor.GetId().length() > 0); }
   bool IsActiveSession();
-  bool IsActiveChastikeySession() { return activeChastikeySession; }
-  void SetActiveChastikeySession(bool is) { activeChastikeySession = is; }
-
-  String GetChastikeyHolder() { return chastikeyHolder; }
-  void SetChastikeyHolder(String hname) { chastikeyHolder = hname; }
 
   unsigned long GetTimeOfLastUnlock() { return timeOfLastUnlock; }
   void SetTimeOfLastUnlock(unsigned long t) { timeOfLastUnlock = t; }
@@ -240,6 +239,13 @@ public:
 
   unsigned long GetTimeOfRandomModeStart() { return timeOfRandomModeStart; }
   void SetTimeOfRandomModeStart(unsigned long t) { timeOfRandomModeStart = t; }
+
+  unsigned long GetLockTimerEnd() { return lockTimerEnd; }
+  void SetLockTimerEnd(unsigned long l) { lockTimerEnd = l; }
+  bool AddLockTimerEnd(unsigned long l);
+  void SubLockTimerEnd(unsigned long l);
+  unsigned long GetLockTimerRemaining();
+  bool IsLockTimerActive() { return (GetLockTimerRemaining() > 0); }
 
   void SetTimeOfLast5sInterval(unsigned long setTime) { timeOfLast5sInterval = setTime; }
   unsigned long GetTimeOfLast5sInterval() { return timeOfLast5sInterval; }
@@ -266,15 +272,8 @@ public:
   void SetRandomModeInt(int mode) { randomShockMode = (mode > 0); randomShocksPerHour = mode; }
   int GetRandomModeInt() { return randomShockMode ? randomShocksPerHour : 0; }
 
-  void SetVouchers(int newVal) { unlockVouchers = newVal; }
-  void SetVouchers(int newVal, String chatId);
-  int GetVouchers() { return unlockVouchers; }
-  void SetCredits(int newVal) { credits = newVal; }
-  void SetCredits(int newVal, String chatId);
-  int GetCredits() { return credits; }
-  void SetCreditFractions(int newVal);
-  void SetCreditFractions(int newVal, String chatId);
-  int GetCreditFractions() { return creditFractions; }
+  void SetAwayCounter(unsigned long newVal) { awayCounter = newVal; }
+  unsigned long GetAwayCounter() { return awayCounter; }
   void SetDeviations(int newVal) { deviations = newVal; }
   int GetDeviations() { return deviations; }
   void SetFailures(int newVal) { failures = newVal; }
@@ -282,15 +281,14 @@ public:
 
   void SetEmergencyReleaseCounter(int newVal) { emergencyReleaseCounter = newVal; emergencyReleaseCounterRequest = false; }
   int GetEmergencyReleaseCounter() { return emergencyReleaseCounter; }
-  void SetEmergencyReleaseCounterRequest(bool req) { emergencyReleaseCounterRequest = req; }
+  void SetEmergencyReleaseCounterRequest(bool req) { emergencyReleaseCounterRequest = req; if (! req) emergencyReleaseCounter = 0; }
   bool GetEmergencyReleaseCounterRequest() { return emergencyReleaseCounterRequest; }
 
   void Punishment(int level);
-  void Shock(int count, long milliseconds);
+  void Shock(int count, long milliseconds, int level=30);
   void Lock();
   void ForcedUnlock();
   void Unlock();
-  void InfoChastikey();
 
   void ProcessRandomShocks();
   void ScheduleNextRandomShock();

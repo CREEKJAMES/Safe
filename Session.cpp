@@ -23,6 +23,7 @@ extern Task tasks;
 String Task::GetStatusMessage()
 {
   String statusStr;
+  Serial.println(ESP.getFreeHeap());
   if (IsActive() && (! IsFulfilled()))
   {
     // active task
@@ -45,6 +46,7 @@ String Task::GetStatusMessage()
       // pending task
       statusStr = "pending";
     }
+    Serial.println("  . return");
     return "[" + String(GetIndex(), DEC) + "]  " + GetMessage() + " (" + statusStr + ")\n";
   }
 }
@@ -144,13 +146,15 @@ int Tasklist::Add(String msg, int tType, unsigned long tBegin, unsigned long tEn
 const String Tasklist::GetTaskList()
 {
   String str = "List of open tasks:\n";
-  Serial.println("*** Tasklist::MessageTasks()");
+  /*
+  Serial.println("*** Tasklist::GetTaskList()");
   for (int i = 0; i < MAX_TASKS; i++)
   {
     Serial.println("- index:" + String(i, DEC));
     str += task[i].GetStatusMessage();
   }
   Print();
+*/
 
   return str;
 }
@@ -219,6 +223,7 @@ void Verification::Init()
     event[i].SetIndex(i);
     event[i].Reset();
   }
+  needsSchedule = true;
 }
 
 
@@ -330,7 +335,7 @@ void Verification::SetVerificationMode(bool onOff, int count)
   SetEnabled(onOff);
   requiredCountPerDay = count;
   Schedule(true);
-  message.WriteCommandsAndSettings();
+  message.WriteCommandsAndSettings("Verification-SetVerificationMode()");
 }
 
 
@@ -347,8 +352,9 @@ void Verification::Schedule(bool force)
   if (IsEnabled())
   {
     Serial.println("- IsEnabled");
-    // schedule new verification events if there is a new day
-    if (force || (timeFunc.GetDayOfWeek() != GetDayOfWeek()))
+    // schedule new verification events at 5:00
+    if (force ||
+        (needsSchedule && (timeFunc.GetHours() == 5)))
     {
       Serial.println("");
       // new day --> update day of week
@@ -390,7 +396,8 @@ void Verification::Schedule(bool force)
         Serial.println("0:");
         break;
       }
-      message.WriteCommandsAndSettings();
+      needsSchedule = false;
+      message.WriteCommandsAndSettings("Verification-Schedule()");
       Print();
     }
   }
@@ -430,7 +437,7 @@ void Verification::CheckIn(String chatId)
       session.SetDeviations(session.GetDeviations() + 1);
       message.SendMessage(SYMBOL_DEVIL_SMILE " Verification is not acceptable. It comes early.", chatId);
     }
-    message.WriteCommandsAndSettings();
+    message.WriteCommandsAndSettings("Verification-CheckIn()");
   }
 }
 
@@ -469,7 +476,7 @@ void Verification::ProcessVerification(String chatId)
           session.SetFailures(session.GetFailures() + 1);
           message.SendMessage(SYMBOL_DEVIL_ANGRY SYMBOL_DEVIL_ANGRY SYMBOL_DEVIL_ANGRY " Verification request has expired!!! Wearer " + users.GetWearer()->GetName() + " has failed to provide a verification in time!", chatId);
           WindowCompleted();
-          message.WriteCommandsAndSettings();
+          message.WriteCommandsAndSettings("Verification-ProcessVerification() verification expired");
         }
       }
     }
@@ -483,7 +490,7 @@ void Verification::ProcessVerification(String chatId)
         message.SendMessage(SYMBOL_DEVIL_SMILE " Verification request - wearer " + users.GetWearer()->GetName() + " must provide a verification showing the verification code " + GetCurrentEvent()->GetCode() + " within " + 
                             timeFunc.Time2String(GetTimeOfNextEnd() - timeFunc.GetTimeInSeconds()) + " from now!", chatId);
         GetCurrentEvent()->SetAnnouncedBegin(true);
-        message.WriteCommandsAndSettings();
+        message.WriteCommandsAndSettings("Verification-ProcessVerification() verification request");
       }
     }
   }
@@ -492,18 +499,18 @@ void Verification::ProcessVerification(String chatId)
 
 
 // ------------------------------------------------------------------------
-void Session::Shock(int count, long milliseconds)
+void Session::Shock(int count, long milliseconds, int level)
 {
   Serial.print("*** Shock() milliseconds=");
   Serial.print(milliseconds);
   Serial.print(", count=");
   Serial.print(count);
-  String prefix = "#=" + String(count, DEC) + " t=" + String((milliseconds / 1000), DEC);
+  String prefix = "#=" + String(count, DEC) + " t=" + String((milliseconds / 1000), DEC) + " l=" + String(level, DEC);
 
   // IFTTT webhook handling
   {
     String payload;
-    String request = "value1=" + String(count, DEC) + "&value2=" + String(milliseconds, DEC) + "&value3=Telegram";
+    String request = "value1=" + String(count, DEC) + "&value2=" + String(milliseconds, DEC) + "," + String(level, DEC) + "&value3=Telegram";
     Serial.print("*** IFTTT webhook");
     Serial.println(request);
 
@@ -525,11 +532,46 @@ void Session::Shock(int count, long milliseconds)
 
   int firstBurst = 0;
   long now = timeFunc.GetTimeInSeconds();
+  long delivered = 0;
 
   Serial.print("last shock ago: ");
   Serial.println(now - timeOfLastShock);
   if ((now - timeOfLastShock) > 250)
     firstBurst = 2500;
+
+  int shockPin = SHOCK_PIN;
+  bool turnOn, turnOff;
+  level = 10;
+  if (level < 20)
+  {
+    shockPin = SHOCK1_PIN;
+    turnOn = LOW;
+    turnOff = HIGH;
+  }
+  else if (level < 40)
+  {
+    shockPin = SHOCK_PIN;
+    turnOn = HIGH;
+    turnOff = LOW;
+  }
+  else if (level < 40)
+  {
+    shockPin = SHOCK2_PIN;
+    turnOn = LOW;
+    turnOff = HIGH;
+  }
+  else if (level < 40)
+  {
+    shockPin = SHOCK3_PIN;
+    turnOn = LOW;
+    turnOff = HIGH;
+  }
+  else
+  {
+    shockPin = SHOCK4_PIN;
+    turnOn = LOW;
+    turnOff = HIGH;
+  }
 
   for (int i = 0; i < count; i++)
   {
@@ -539,14 +581,38 @@ void Session::Shock(int count, long milliseconds)
     Serial.print(milliseconds);
     Serial.println(" ms");
 
-    digitalWrite(SHOCK_PIN, HIGH);
+//    digitalWrite(shockPin, turnOn);
+    digitalWrite(4, HIGH);
     delay(100);
-    digitalWrite(SHOCK_PIN, LOW);
+//    digitalWrite(shockPin, turnOff);
+    digitalWrite(4, LOW);
     delay(200);
 
-    digitalWrite(SHOCK_PIN, HIGH);
-    delay(milliseconds + firstBurst);
-    digitalWrite(SHOCK_PIN, LOW);
+//    digitalWrite(shockPin, turnOn);
+    digitalWrite(4, HIGH);
+    delay(firstBurst);
+//    digitalWrite(shockPin, turnOff);
+    digitalWrite(4, LOW);
+    delay(50);
+
+    while(milliseconds > delivered)
+    {
+//    digitalWrite(shockPin, turnOn);
+      digitalWrite(4, HIGH);
+      if ((milliseconds - delivered) > 10000L)
+      {
+        delay(10000L);
+        delivered += 10000L;
+      }
+      else
+      {
+        delay(milliseconds - delivered);
+        delivered += (milliseconds - delivered);
+      }
+//    digitalWrite(shockPin, turnOff);
+      digitalWrite(4, LOW);
+      delay(50);
+    }
 
     delay(SHOCK_BREAK_DURATION);
   }
@@ -617,121 +683,71 @@ unsigned long Session::GetRemainingTime(bool forDisplay)
 
 
 // ------------------------------------------------------------------------
-void Session::SetCredits(int newVal, String chatId)
+unsigned long Session::GetLockTimerRemaining()
 {
-  int creditCount = GetCredits();
-  SetCredits(newVal);
-  if (GetCredits() > creditCount)
-    message.SendMessage(String(SYMBOL_CREDIT) + " Wearer received " + (GetCredits() > creditCount) + " credits.", chatId);
+  if (timeFunc.GetTimeInSeconds() > lockTimerEnd)
+    return 0;
+  else
+    return lockTimerEnd - timeFunc.GetTimeInSeconds();
 }
 
 
 // ------------------------------------------------------------------------
-void Session::SetCreditFractions(int newVal)
+bool Session::AddLockTimerEnd(unsigned long lockTime)
 {
-  creditFractions = newVal;
-  if (creditFractions >= 10)
+  bool limitReached = false;
+  // limit extension to 7 days
+  if (lockTime > 7*86400L)
   {
-    int newCredits = creditFractions / 10;
-    creditFractions = creditFractions % 10;
-    SetCredits(GetCredits() + newCredits);
+    lockTime = 7*86400L;
+    limitReached = true;
   }
+
+  if (IsLockTimerActive())
+  {
+    // lock timer may not exceed 7 days
+    if ((GetLockTimerEnd() + lockTime) > (timeFunc.GetTimeInSeconds() + 7*86400L))
+    {
+      SetLockTimerEnd(timeFunc.GetTimeInSeconds() + 7*86400L);
+      limitReached = true;
+    }
+    else
+      SetLockTimerEnd(GetLockTimerEnd() + lockTime);
+  }
+  else
+    SetLockTimerEnd(timeFunc.GetTimeInSeconds() + lockTime);
+
+  return limitReached;
 }
 
 
 // ------------------------------------------------------------------------
-void Session::SetCreditFractions(int newVal, String chatId)
+void Session::SubLockTimerEnd(unsigned long lockTime)
 {
-  int creditCount = GetCredits();
-  SetCreditFractions(newVal);
-  if (GetCredits() > creditCount)
-    message.SendMessage(String(SYMBOL_CREDIT) + " Wearer received " + (GetCredits() > creditCount) + " credits.", chatId);
-}
-
-
-// ------------------------------------------------------------------------
-void Session::SetVouchers(int newVal, String chatId)
-{
-  int voucherCount = GetVouchers();
-  SetVouchers(newVal);
-  if (GetVouchers() > voucherCount)
-    message.SendMessage(String(SYMBOL_VOUCHER) + " Wearer received " + (GetVouchers() > voucherCount) + " unlock vouchers.", chatId);
+  if (IsLockTimerActive())
+  {
+    if (GetLockTimerEnd() > lockTime)
+      SetLockTimerEnd(GetLockTimerEnd() - lockTime);
+    else
+      // we want the lockTimerEnd to be set to the current time if cleared to avoid underrun issues
+      SetLockTimerEnd(timeFunc.GetTimeInSeconds());
+  }
+  else
+    SetLockTimerEnd(timeFunc.GetTimeInSeconds() - lockTime);
 }
 
 
 // ------------------------------------------------------------------------
 bool Session::IsActiveSession()
 {
-  return (! users.GetWearer()->IsFreeWearer()) || activeChastikeySession;
-}
-
-
-// ------------------------------------------------------------------------
-void Session::InfoChastikey()
-{
-  String payload;
-
-  Serial.println("*** Session::InfoChastikey()");
-/*
-  int trial = 0;
-  bool success = false;
-  while ((trial < 10) && ! success)
-  {
-    success = emlaServer.WGet("https://api.chastikey.com/v0.3/listlocks.php?username=cblock", payload);
-    trial++;
-    if (trial > 1)
-    {
-      Serial.print("Retry: ");
-      Serial.println(trial);
-    }
-    if (! success)
-      delay(1000);
-  }
-  //  Serial.println(payload);
-
-  if (payload.length() > 0)
-  {
-    // Extract values
-    const size_t capacity = JSON_ARRAY_SIZE(1) + JSON_ARRAY_SIZE(10) + JSON_OBJECT_SIZE(2) + JSON_OBJECT_SIZE(3) + 10*JSON_OBJECT_SIZE(7) + 1260;
-    DynamicJsonDocument doc(capacity);
-
-    deserializeJson(doc, payload);
-
-    JsonObject response_0 = doc["response"][0];
-    int response_0_status = response_0["status"]; // 200
-    const char* response_0_message = response_0["message"]; // "Success"
-    long response_0_timestampGenerated = response_0["timestampGenerated"]; // 1569859752
-
-    JsonArray locks = doc["locks"];
-
-    SetActiveChastikeySession(false);
-    SetChastikeyHolder("");
-    for (int i = 0; i < 25; i++)
-    {
-      JsonObject lockInfo = locks[i];
-      String lockStatus = lockInfo["status"]; // "UnlockedReal"
-      Serial.print("- Chastikey lock ");
-      Serial.print(i);
-      Serial.print(": ");
-      Serial.println(lockStatus);
-      if (lockStatus == "Locked")
-      {
-        SetActiveChastikeySession(true);
-        SetChastikeyHolder(lockInfo["lockedBy"]);
-      }
-//      const char* locks_combination = locks["combination"]; // "84725435"
-    }
-  }
-  Serial.print("- Chastikey session: ");
-  Serial.println(IsActiveChastikeySession());
-  */
+  return (! users.GetWearer()->IsFreeWearer());
 }
 
 
 // ------------------------------------------------------------------------
 void Session::Punishment(int level)
 {
-  message.SendMessage("Wearer " + users.GetWearer()->GetName() + "needs to be punished.", chatId);
+  message.SendMessage("Wearer " + users.GetWearer()->GetName() + "needs to be treated.", chatId);
   unsigned long rnd = random(10000);
   switch (rnd * level / 10000)
   {
@@ -780,7 +796,7 @@ int Session::SetRandomMode(bool onOff, int shocksPerHour)
   unsigned long now = timeFunc.GetTimeInSeconds();
   unsigned long duration = now - GetTimeOfRandomModeStart();
   // credit is given for each hours minus 5 seconds in order to prevent small deviations from the 1 hour duration
-  int creditIncrement = duration / 3595;
+//  int creditIncrement = duration / 3595;
   bool oldRandomShockMode = randomShockMode;
   randomShockMode = onOff;
 
@@ -799,14 +815,15 @@ int Session::SetRandomMode(bool onOff, int shocksPerHour)
   else if (oldRandomShockMode)
   {
     // if randomShockMode is switched off, but oldRandomShockMode was on...
-    Serial.print("- credit increment: ");
-    Serial.println(creditIncrement);
-    SetCredits(GetCredits() + creditIncrement);
+//    Serial.print("- credit increment: ");
+//    Serial.println(creditIncrement);
+//    SetCredits(GetCredits() + creditIncrement);
   }
 
-  message.WriteCommandsAndSettings();
+  message.WriteCommandsAndSettings("Session-SetRandomMode()");
 
-  return creditIncrement;
+//  return creditIncrement;
+  return 0;
 }
 
 
@@ -848,6 +865,8 @@ void Session::ProcessRandomShocks()
     if (duration > RANDOM_SHOCK_AUTO_OFF_SECONDS)
     {
       message.SendMessage("Random mode will be turned off now, because it ran for " + String(RANDOM_SHOCK_AUTO_OFF_SECONDS/3600, DEC) + " hours.");
+      randomShockMode = false;
+      message.WriteCommandsAndSettings("Session-ProcessRandomShocks()");
       message.RandomShockModeAction("off", USER_ID_BOT, GROUP_CHAT_ID, FORCE);
       return;
     }

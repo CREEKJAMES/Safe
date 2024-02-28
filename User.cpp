@@ -4,6 +4,7 @@
 #include "User.h"
 #include "Defs.h"
 #include "Message.h"
+#include "Session.h"
 
 
 RoleSet roles;
@@ -11,6 +12,7 @@ RoleSet roles;
 extern TimeFunctions timeFunc;
 extern UniversalTelegramBot bot;
 extern Message message;
+extern Session session;
 extern UserSet users;
 
 
@@ -76,6 +78,19 @@ bool User::UpdateRoleId(int r, bool force)
 
   if (roleId != oldRoleId)
     userSet->Update();
+}
+
+
+// ------------------------------------------------------------------------
+void User::SetLastMessageTime(unsigned int now)
+{
+  Serial.println("*** SetLastMessageTime(" + String(now, DEC) + ")");
+  Serial.println("- before: " + GetName() + " (" + GetRoleStr() + ") [" + timeFunc.GetTimeString(WITH_DATE, GetLastMessageTime()) + "]");
+  if (now == 0)
+    lastMessageTime = timeFunc.GetTimeInSeconds();
+  else
+    lastMessageTime = now;
+  Serial.println("- after: " + GetName() + " (" + GetRoleStr() + ") [" + timeFunc.GetTimeString(WITH_DATE, GetLastMessageTime()) + "]");
 }
 
 
@@ -230,6 +245,27 @@ String UserSet::GetUsersInfo()
     ++i;
   }
   return info;
+}
+
+
+// ------------------------------------------------------------------------
+bool UserSet::MayShock(String fromId)
+{
+  bool may;
+  User *u = users.GetUserFromId(fromId);
+  if (u)
+  {
+    if (u->IsHolder() ||
+        u->IsBot() ||
+        (u->IsTeaser() && session.IsTeasingMode()) ||
+        (u->IsWearer() && session.IsTeasingMode()) ||
+        (users.GetWearer()->IsFreeWearer()))
+      return true;
+    else
+      return false;
+  }
+  else
+    return false;
 }
 
 
